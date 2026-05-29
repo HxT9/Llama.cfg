@@ -37,6 +37,7 @@ def suggest(
     ctv: str = "f16",
     headroom_frac: float = DEFAULT_HEADROOM_FRAC,
     compute_reserve_mib: int = DEFAULT_COMPUTE_RESERVE_MIB,
+    mmproj_bytes: int = 0,
 ) -> Suggestion:
     warnings: list[str] = []
 
@@ -50,9 +51,14 @@ def suggest(
     offloadable = n_layers + 1  # repeating blocks + output/embedding layer
     bytes_per_layer = meta.file_size_bytes / offloadable
 
+    # the multimodal projector (if loaded with --mmproj) is GPU-offloaded by
+    # default, so its weights eat into the layer-offload budget.
+    mmproj_bytes = max(0, int(mmproj_bytes))
+    mmproj_mib = mmproj_bytes / MIB
+
     headroom_mib = vram_mib * headroom_frac
     budget_mib = vram_mib - headroom_mib - compute_reserve_mib
-    budget_bytes = max(0.0, budget_mib) * MIB
+    budget_bytes = max(0.0, budget_mib * MIB - mmproj_bytes)
 
     n_head_kv = meta.n_head_kv
     head_dim = meta.head_dim
@@ -101,7 +107,7 @@ def suggest(
     ngl = min(ngl, offloadable)
     fits_all = ngl >= offloadable
 
-    used_mib = (ngl * bytes_per_layer + kv_bytes(ngl, chosen_ctx)) / MIB
+    used_mib = (ngl * bytes_per_layer + kv_bytes(ngl, chosen_ctx) + mmproj_bytes) / MIB
 
     moe_hint = None
     if meta.is_moe and not fits_all:
@@ -128,6 +134,7 @@ def suggest(
         "bytes_per_layer_mib": round(bytes_per_layer / MIB, 2),
         "kv_per_layer_per_token_bytes": round(kv_per_layer_token, 2),
         "kv_total_mib_at_ctx": round(kv_bytes(ngl, chosen_ctx) / MIB, 2),
+        "mmproj_mib": round(mmproj_mib, 2),
         "estimated_vram_used_mib": round(used_mib, 2),
         "fits_all_layers": fits_all,
         "is_moe": meta.is_moe,

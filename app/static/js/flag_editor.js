@@ -69,7 +69,7 @@ export function renderEditor(entry) {
   box.appendChild(el("div", { class: "section-title" }, "Suggestion"));
   const suggestMount = el("div", {});
   box.appendChild(suggestMount);
-  renderSuggest(suggestMount, () => current.model_display_path, applySuggestion);
+  renderSuggest(suggestMount, () => current.model_display_path, applySuggestion, () => current.mmproj);
 
   // common flags
   box.appendChild(el("div", { class: "section-title" }, "Common flags"));

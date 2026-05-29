@@ -40,12 +40,17 @@ def suggest(req: SuggestRequest) -> Suggestion:
     if meta.error and not meta.n_layers:
         raise HTTPException(status_code=400, detail=f"cannot read GGUF: {meta.error}")
     vram_mib, warnings = _vram_budget(req, settings)
+    mmproj_bytes = 0
+    if req.mmproj_path:
+        mm = read_gguf_metadata(req.mmproj_path)
+        mmproj_bytes = mm.file_size_bytes or 0
     result = run_suggest(
         meta,
         vram_mib,
         context=req.context,
         ctk=req.ctk,
         ctv=req.ctv,
+        mmproj_bytes=mmproj_bytes,
         headroom_frac=req.headroom_frac
         if req.headroom_frac is not None
         else settings.headroom_frac,

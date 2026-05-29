@@ -3,8 +3,9 @@ import { state, el, toast } from "./state.js";
 
 const CACHE_TYPES = ["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"];
 
-// mount: DOM node; getModelPath: () => string; onApply: (kind, suggestion) => void
-export function renderSuggest(mount, getModelPath, onApply) {
+// mount: DOM node; getModelPath: () => string; onApply: (kind, suggestion) => void;
+// getMmproj: () => string|null (counted against VRAM when set)
+export function renderSuggest(mount, getModelPath, onApply, getMmproj) {
   mount.innerHTML = "";
   const box = el("div", { class: "suggest-box" });
 
@@ -34,6 +35,7 @@ export function renderSuggest(mount, getModelPath, onApply) {
     try {
       const sugg = await api.suggest({
         model_path,
+        mmproj_path: getMmproj ? (getMmproj() || null) : null,
         context: ctxInput.value ? Number(ctxInput.value) : null,
         ctk: ctk.value, ctv: ctv.value,
         vram_budget_mode: mode.value,
@@ -58,6 +60,7 @@ function renderResult(mount, sugg, onApply) {
     `VRAM budget:   ${b.budget_mib} MiB (of ${b.vram_mib}, headroom ${b.headroom_mib} + reserve ${b.compute_reserve_mib})`,
     `layers:        offload ${sugg.explicit.ngl} / ${b.offloadable_layers}  (${b.fits_all_layers ? "ALL fit" : "partial"})`,
     `per-layer:     ${b.bytes_per_layer_mib} MiB    KV total: ${b.kv_total_mib_at_ctx} MiB @ ctx ${sugg.explicit.c}`,
+    b.mmproj_mib ? `mmproj:        ${b.mmproj_mib} MiB (GPU-offloaded projector)` : null,
     `est. VRAM use: ${b.estimated_vram_used_mib} MiB`,
     b.is_moe ? `MoE:           ${b.expert_used_count}/${b.expert_count} experts active (full weights resident)` : null,
   ].filter(Boolean);

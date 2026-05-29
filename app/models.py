@@ -72,6 +72,7 @@ class HardwareInfo(BaseModel):
 # --- Suggestion --------------------------------------------------------------
 class SuggestRequest(BaseModel):
     model_path: str
+    mmproj_path: Optional[str] = None       # counted against VRAM if offloaded
     context: Optional[int] = None           # desired ctx; None = auto-pick max
     ctk: str = "f16"
     ctv: str = "f16"

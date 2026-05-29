@@ -70,6 +70,17 @@ def test_quantized_cache_smaller_than_f16():
     assert q8.explicit["ngl"] >= f16.explicit["ngl"]
 
 
+def test_mmproj_reduces_budget_and_ngl():
+    meta = make_meta(file_gib=8, layers=32)
+    base = suggest(meta, vram_mib=10000, context=4096)
+    withmm = suggest(meta, vram_mib=10000, context=4096, mmproj_bytes=2 * 1024 * MIB)
+    # accounting for a 2 GiB projector can only lower (or equal) the offload count
+    assert withmm.explicit["ngl"] <= base.explicit["ngl"]
+    assert withmm.breakdown["mmproj_mib"] == 2048
+    # projector is included in the estimated VRAM usage
+    assert withmm.breakdown["estimated_vram_used_mib"] >= 2048
+
+
 def test_missing_metadata_returns_warning():
     s = suggest(GgufMetadata(file_size_bytes=0), vram_mib=8192)
     assert s.warnings
