@@ -265,6 +265,7 @@ def read_gguf_metadata(path: str | os.PathLike) -> GgufMetadata:
         head_dim=head_dim,
         expert_count=int(expert_count),
         expert_used_count=int(expert_used),
+        full_attention_interval=_as_int(a("full_attention_interval")),
         file_size_bytes=size,
         is_moe=int(expert_count) > 1,
     )

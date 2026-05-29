@@ -69,8 +69,17 @@ def suggest(
     else:
         warnings.append("KV cache size unknown (missing head metadata); ignored in math.")
 
+    # Hybrid models (e.g. Qwen3-Next/3.6: full_attention_interval=N) only keep a
+    # context-scaling KV cache on the full-attention layers; the rest are
+    # SSM/linear and use a tiny fixed state. Scale KV by that fraction.
+    fa = meta.full_attention_interval
+    n_kv_layers = (
+        max(1, round(n_layers / fa)) if (fa and fa > 1) else n_layers
+    )
+    kv_layer_ratio = n_kv_layers / n_layers if n_layers else 1.0
+
     def kv_bytes(n: int, c: int) -> float:
-        return n * c * kv_per_layer_token
+        return n * kv_layer_ratio * c * kv_per_layer_token
 
     def max_ngl(c: int) -> int:
         for n in range(offloadable, -1, -1):
@@ -175,6 +184,7 @@ def suggest(
         "ngl": ngl,
         "bytes_per_layer_mib": round(bytes_per_layer / MIB, 2),
         "kv_per_layer_per_token_bytes": round(kv_per_layer_token, 2),
+        "kv_layers": n_kv_layers,
         "kv_total_mib_at_ctx": round(kv_bytes(ngl, chosen_ctx) / MIB, 2),
         "mmproj_mib": round(mmproj_mib, 2),
         "estimated_vram_used_mib": round(used_mib, 2),

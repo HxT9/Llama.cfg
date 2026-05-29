@@ -2,7 +2,7 @@ from app.core.suggester import MIB, suggest
 from app.models import GgufMetadata
 
 
-def make_meta(file_gib=8, layers=32, moe=False):
+def make_meta(file_gib=8, layers=32, moe=False, full_attention_interval=None):
     return GgufMetadata(
         architecture="qwen3" + ("moe" if moe else ""),
         n_layers=layers,
@@ -13,6 +13,7 @@ def make_meta(file_gib=8, layers=32, moe=False):
         head_dim=128,
         expert_count=128 if moe else 0,
         expert_used_count=8 if moe else 0,
+        full_attention_interval=full_attention_interval,
         file_size_bytes=int(file_gib * 1024 * MIB),
         is_moe=moe,
     )
@@ -132,6 +133,21 @@ def test_mmproj_reduces_budget_and_ngl():
     assert withmm.breakdown["mmproj_mib"] == 2048
     # projector is included in the estimated VRAM usage
     assert withmm.breakdown["estimated_vram_used_mib"] >= 2048
+
+
+def test_hybrid_model_kv_scaled_by_full_attention_interval():
+    # full_attention_interval=4 -> only ~1/4 of layers carry a KV cache, so the
+    # KV total (and thus expert spill) is much smaller at high context.
+    full = make_meta(file_gib=16, layers=40, moe=True)
+    hybrid = make_meta(file_gib=16, layers=40, moe=True, full_attention_interval=4)
+    sf = suggest(full, vram_mib=16376, context=131072, ctk="q8_0", ctv="q8_0", expert_fraction=0.9)
+    sh = suggest(hybrid, vram_mib=16376, context=131072, ctk="q8_0", ctv="q8_0", expert_fraction=0.9)
+    # hybrid keeps far fewer KV layers
+    assert sh.breakdown["kv_layers"] == 10
+    assert sf.breakdown["kv_layers"] == 40
+    assert sh.breakdown["kv_total_mib_at_ctx"] < sf.breakdown["kv_total_mib_at_ctx"] / 2
+    # smaller KV -> fewer experts forced to CPU
+    assert sh.explicit.get("n-cpu-moe", 0) <= sf.explicit.get("n-cpu-moe", 0)
 
 
 def test_missing_metadata_returns_warning():

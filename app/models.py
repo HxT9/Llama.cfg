@@ -20,6 +20,7 @@ class GgufMetadata(BaseModel):
     expert_count: int = 0                   # <arch>.expert_count
     expert_used_count: int = 0              # <arch>.expert_used_count
     expert_fraction: Optional[float] = None  # fraction of params in MoE experts
+    full_attention_interval: Optional[int] = None  # hybrid: 1 full-attn layer per N
     file_size_bytes: int = 0
     is_moe: bool = False
     error: Optional[str] = None

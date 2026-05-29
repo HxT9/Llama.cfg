@@ -47,9 +47,14 @@ export function computeEstimate(meta, flags, totalVramMib) {
   let gpuWeight = ngl * bytesPerLayer - Math.min(nCpuMoe, ngl) * perLayerExpert;
   gpuWeight = Math.max(0, gpuWeight);
 
+  // hybrid models keep KV only on full-attention layers (1 per N)
+  const fa = meta.full_attention_interval;
+  const kvRatio = fa && fa > 1
+    ? Math.max(1, Math.round(meta.n_layers / fa)) / meta.n_layers
+    : 1;
   const kv =
     meta.n_head_kv && meta.head_dim
-      ? ngl * ctx * meta.n_head_kv * meta.head_dim * (bpe(flags.ctk) + bpe(flags.ctv))
+      ? ngl * kvRatio * ctx * meta.n_head_kv * meta.head_dim * (bpe(flags.ctk) + bpe(flags.ctv))
       : 0;
 
   return {
