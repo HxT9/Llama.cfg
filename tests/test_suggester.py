@@ -102,14 +102,15 @@ def test_fit_fields_populated():
     assert "n-cpu-moe" not in s.fit and "cpu-moe" not in s.fit
 
 
-def test_fit_also_pins_moe_offload():
+def test_fit_does_not_pin_moe_offload():
+    # --fit owns device placement; the fit config must not carry n-cpu-moe,
+    # even though the explicit suggestion does.
     meta = make_meta(file_gib=36, layers=48, moe=True)
     s = suggest(meta, vram_mib=12288, context=4096, expert_fraction=0.85)
     assert s.fit["fit"] == "on"
-    # fit carries the same expert offload as explicit, so --fit only tunes ngl/ctx
-    assert "n-cpu-moe" in s.fit
+    assert "n-cpu-moe" not in s.fit
     assert "cpu-moe" not in s.fit
-    assert s.fit.get("n-cpu-moe") == s.explicit.get("n-cpu-moe")
+    assert "n-cpu-moe" in s.explicit          # explicit still pins it
 
 
 def test_quantized_cache_smaller_than_f16():

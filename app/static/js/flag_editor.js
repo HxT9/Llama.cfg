@@ -256,10 +256,8 @@ function applySuggestion(kind, sugg) {
     f["ctk"] = sugg.fit.ctk;
     f["ctv"] = sugg.fit.ctv;
     delete f["ngl"]; delete f["c"];
-    // pin expert offload (fit only auto-tunes unset args); always n-cpu-moe
-    if ("n-cpu-moe" in sugg.fit) f["n-cpu-moe"] = String(sugg.fit["n-cpu-moe"]);
-    else delete f["n-cpu-moe"];
-    delete f["cpu-moe"];
+    // let --fit own device placement; clear any pinned expert offload
+    delete f["n-cpu-moe"]; delete f["cpu-moe"];
   }
   current.suggestion_snapshot = sugg;
   renderEditor(current);
