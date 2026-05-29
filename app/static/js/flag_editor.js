@@ -298,14 +298,16 @@ function allFlagRow(f) {
 function applySuggestion(kind, sugg) {
   const f = current.flags;
   if (kind === "explicit") {
-    f["ngl"] = String(sugg.explicit.ngl);
     f["c"] = String(sugg.explicit.c);
     f["ctk"] = sugg.explicit.ctk;
     f["ctv"] = sugg.explicit.ctv;
     delete f["fit"]; delete f["fitc"]; delete f["fitt"];
-    // MoE expert offload (always n-cpu-moe); clear any stale cpu-moe
-    if ("n-cpu-moe" in sugg.explicit) f["n-cpu-moe"] = String(sugg.explicit["n-cpu-moe"]);
-    else delete f["n-cpu-moe"];
+    // MoE expert offload uses n-cpu-moe and leaves ngl unset; otherwise set ngl
+    if ("n-cpu-moe" in sugg.explicit) {
+      f["n-cpu-moe"] = String(sugg.explicit["n-cpu-moe"]); delete f["ngl"];
+    } else {
+      f["ngl"] = String(sugg.explicit.ngl); delete f["n-cpu-moe"];
+    }
     delete f["cpu-moe"];
   } else {
     f["fit"] = sugg.fit.fit;

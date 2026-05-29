@@ -51,14 +51,14 @@ export function renderSuggest(mount, getModelPath, onApply, getMmproj) {
 
 function renderResult(mount, sugg, onApply) {
   mount.innerHTML = "";
-  if (!sugg.explicit || sugg.explicit.ngl === undefined) {
+  if (!sugg.explicit || sugg.explicit.c === undefined) {
     mount.appendChild(el("div", { class: "warn" }, (sugg.warnings || []).join("; ") || "no suggestion"));
     return;
   }
   const b = sugg.breakdown || {};
   const lines = [
     `VRAM budget:   ${b.budget_mib} MiB (of ${b.vram_mib}, headroom ${b.headroom_mib} + reserve ${b.compute_reserve_mib})`,
-    `layers:        offload ${sugg.explicit.ngl} / ${b.offloadable_layers}  (${b.fits_all_layers ? "ALL fit" : "partial"})`,
+    `layers:        offload ${b.ngl} / ${b.offloadable_layers}  (${b.fits_all_layers ? "ALL fit" : "partial"})`,
     `per-layer:     ${b.bytes_per_layer_mib} MiB    KV total: ${b.kv_total_mib_at_ctx} MiB @ ctx ${sugg.explicit.c}`,
     b.mmproj_mib ? `mmproj:        ${b.mmproj_mib} MiB (GPU-offloaded projector)` : null,
     `est. VRAM use: ${b.estimated_vram_used_mib} MiB`,
@@ -74,8 +74,11 @@ function renderResult(mount, sugg, onApply) {
   }
   mount.appendChild(el("div", { class: "apply-row" },
     el("button", { class: "btn primary", onclick: () => onApply("explicit", sugg) },
-      `Apply explicit (-ngl ${sugg.explicit.ngl}, -c ${sugg.explicit.c}` +
-      (sugg.explicit["n-cpu-moe"] != null ? `, n-cpu-moe ${sugg.explicit["n-cpu-moe"]}` : "") + `)`),
+      `Apply explicit (` +
+      (sugg.explicit["n-cpu-moe"] != null
+        ? `n-cpu-moe ${sugg.explicit["n-cpu-moe"]}`
+        : `-ngl ${sugg.explicit.ngl}`) +
+      `, -c ${sugg.explicit.c})`),
     el("button", { class: "btn", onclick: () => onApply("fit", sugg) },
       `Apply fit (fitc ${sugg.fit.fitc}, fitt ${sugg.fit.fitt})`),
   ));

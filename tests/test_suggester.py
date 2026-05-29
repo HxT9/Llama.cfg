@@ -59,10 +59,12 @@ def test_explicit_moe_sets_n_cpu_moe():
     # some experts to CPU while keeping all layers on GPU.
     meta = make_meta(file_gib=36, layers=48, moe=True)
     s = suggest(meta, vram_mib=12288, context=4096, expert_fraction=0.85)
-    assert s.explicit["ngl"] == meta.n_layers + 1          # all layers on GPU
+    # MoE offload drives placement via n-cpu-moe and leaves ngl unset
+    assert "ngl" not in s.explicit
     assert "n-cpu-moe" in s.explicit
     assert "cpu-moe" not in s.explicit                     # never emit cpu-moe
     assert 0 < s.explicit["n-cpu-moe"] <= meta.n_layers
+    assert s.breakdown["ngl"] == meta.n_layers + 1         # effective: all layers on GPU
     assert s.breakdown["moe_offload"]
 
 

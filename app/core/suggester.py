@@ -149,7 +149,12 @@ def suggest(
         )
         warnings.append(moe_hint)
 
-    explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv, **moe_offload}
+    # For MoE expert offload, drive placement with n-cpu-moe and leave ngl
+    # unset (llama defaults to all layers on GPU). Otherwise set ngl explicitly.
+    if moe_offload:
+        explicit = {"c": chosen_ctx, "ctk": ctk, "ctv": ctv, **moe_offload}
+    else:
+        explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv}
     # Let --fit fully own device placement (it handles MoE expert offload
     # itself). Pinning n-cpu-moe over-constrains it and leaves VRAM underused,
     # so the fit config carries only fit/fitc/fitt + the KV quant choice.
@@ -167,6 +172,7 @@ def suggest(
         "budget_mib": int(budget_mib),
         "n_layers": n_layers,
         "offloadable_layers": offloadable,
+        "ngl": ngl,
         "bytes_per_layer_mib": round(bytes_per_layer / MIB, 2),
         "kv_per_layer_per_token_bytes": round(kv_per_layer_token, 2),
         "kv_total_mib_at_ctx": round(kv_bytes(ngl, chosen_ctx) / MIB, 2),
