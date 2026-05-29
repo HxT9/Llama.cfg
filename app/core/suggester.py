@@ -38,6 +38,7 @@ def suggest(
     headroom_frac: float = DEFAULT_HEADROOM_FRAC,
     compute_reserve_mib: int = DEFAULT_COMPUTE_RESERVE_MIB,
     mmproj_bytes: int = 0,
+    expert_fraction: float | None = None,
 ) -> Suggestion:
     warnings: list[str] = []
 
@@ -109,8 +110,40 @@ def suggest(
 
     used_mib = (ngl * bytes_per_layer + kv_bytes(ngl, chosen_ctx) + mmproj_bytes) / MIB
 
+    # --- MoE expert offload (better than dropping whole layers) -------------
+    # When a MoE model doesn't fully fit, keep ALL layers on GPU (attention +
+    # KV stay fast) and push the bulk expert weights of the first N layers to
+    # CPU RAM via --n-cpu-moe (or --cpu-moe when all of them must move).
+    moe_offload: dict = {}
     moe_hint = None
-    if meta.is_moe and not fits_all:
+    if meta.is_moe and not fits_all and expert_fraction and 0 < expert_fraction < 1:
+        expert_bytes = meta.file_size_bytes * expert_fraction
+        non_expert_bytes = meta.file_size_bytes - expert_bytes
+        per_layer_expert = expert_bytes / n_layers
+        kv_all = kv_bytes(offloadable, chosen_ctx)
+        avail_for_experts = budget_bytes - non_expert_bytes - kv_all
+        if per_layer_expert > 0 and avail_for_experts > 0:
+            layers_experts_on_gpu = min(n_layers, int(avail_for_experts // per_layer_expert))
+            n_cpu_moe = n_layers - layers_experts_on_gpu
+            ngl = offloadable                       # all layers on GPU
+            fits_all = True                         # weights placed (experts spilled)
+            if n_cpu_moe >= n_layers:
+                moe_offload = {"cpu-moe": "true"}
+            elif n_cpu_moe > 0:
+                moe_offload = {"n-cpu-moe": n_cpu_moe}
+            used_mib = (
+                non_expert_bytes
+                + layers_experts_on_gpu * per_layer_expert
+                + kv_all + mmproj_bytes
+            ) / MIB
+        else:
+            # not even attention layers + KV fit with all experts on CPU
+            moe_hint = (
+                "Even with all experts on CPU (--cpu-moe), the non-expert weights "
+                "plus KV cache exceed VRAM. Lower context or quantize the KV cache."
+            )
+            warnings.append(moe_hint)
+    elif meta.is_moe and not fits_all:
         moe_hint = (
             "MoE model and not all layers fit: consider --cpu-moe (keep all expert "
             "weights in CPU RAM) or --n-cpu-moe N to offload only the first N layers' "
@@ -118,7 +151,7 @@ def suggest(
         )
         warnings.append(moe_hint)
 
-    explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv}
+    explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv, **moe_offload}
     fit = {
         "fit": "on",
         "fitc": chosen_ctx,
@@ -140,6 +173,8 @@ def suggest(
         "is_moe": meta.is_moe,
         "expert_count": meta.expert_count,
         "expert_used_count": meta.expert_used_count,
+        "expert_fraction": round(expert_fraction, 3) if expert_fraction else None,
+        "moe_offload": moe_offload or None,
         "moe_hint": moe_hint,
     }
     return Suggestion(explicit=explicit, fit=fit, breakdown=breakdown, warnings=warnings)

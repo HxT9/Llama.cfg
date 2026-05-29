@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.core import store
-from app.core.gguf_reader import read_gguf_metadata
+from app.core.gguf_reader import read_gguf_metadata, read_moe_expert_fraction
 from app.core.hardware import detect
 from app.models import Suggestion, SuggestRequest
 from app.core.suggester import suggest as run_suggest
@@ -44,6 +44,7 @@ def suggest(req: SuggestRequest) -> Suggestion:
     if req.mmproj_path:
         mm = read_gguf_metadata(req.mmproj_path)
         mmproj_bytes = mm.file_size_bytes or 0
+    expert_fraction = read_moe_expert_fraction(req.model_path) if meta.is_moe else None
     result = run_suggest(
         meta,
         vram_mib,
@@ -51,6 +52,7 @@ def suggest(req: SuggestRequest) -> Suggestion:
         ctk=req.ctk,
         ctv=req.ctv,
         mmproj_bytes=mmproj_bytes,
+        expert_fraction=expert_fraction,
         headroom_frac=req.headroom_frac
         if req.headroom_frac is not None
         else settings.headroom_frac,

@@ -54,6 +54,45 @@ def test_moe_uses_full_size_and_hints_cpu_moe():
     assert s.breakdown["bytes_per_layer_mib"] > 0
 
 
+def test_explicit_moe_sets_n_cpu_moe():
+    # big MoE: non-expert weights + KV fit, but full model doesn't -> spill
+    # some experts to CPU while keeping all layers on GPU.
+    meta = make_meta(file_gib=36, layers=48, moe=True)
+    s = suggest(meta, vram_mib=12288, context=4096, expert_fraction=0.85)
+    assert s.explicit["ngl"] == meta.n_layers + 1          # all layers on GPU
+    assert ("n-cpu-moe" in s.explicit) or ("cpu-moe" in s.explicit)
+    if "n-cpu-moe" in s.explicit:
+        assert 0 < s.explicit["n-cpu-moe"] <= meta.n_layers
+    assert s.breakdown["moe_offload"]
+
+
+def _spill(s):
+    if "cpu-moe" in s.explicit:
+        return s.breakdown["n_layers"]
+    return s.explicit.get("n-cpu-moe", 0)
+
+
+def test_moe_spill_increases_as_vram_shrinks():
+    meta = make_meta(file_gib=36, layers=48, moe=True)
+    big = suggest(meta, vram_mib=14000, context=4096, expert_fraction=0.85)
+    small = suggest(meta, vram_mib=9000, context=4096, expert_fraction=0.85)
+    assert _spill(small) >= _spill(big)
+
+
+def test_moe_extreme_low_vram_cpu_moe_or_hint():
+    # at a tiny budget, either all experts spill (cpu-moe) or it can't fit (hint)
+    meta = make_meta(file_gib=36, layers=48, moe=True)
+    s = suggest(meta, vram_mib=6500, context=4096, expert_fraction=0.90)
+    assert ("cpu-moe" in s.explicit) or ("n-cpu-moe" in s.explicit) or s.breakdown["moe_hint"]
+
+
+def test_dense_model_never_gets_moe_offload():
+    meta = make_meta(file_gib=20, layers=40, moe=False)
+    s = suggest(meta, vram_mib=8192, context=4096, expert_fraction=None)
+    assert "n-cpu-moe" not in s.explicit
+    assert "cpu-moe" not in s.explicit
+
+
 def test_fit_fields_populated():
     meta = make_meta()
     s = suggest(meta, vram_mib=16376, context=16384)

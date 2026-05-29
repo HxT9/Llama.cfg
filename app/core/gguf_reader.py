@@ -115,6 +115,47 @@ def _read_kv(path: Path) -> tuple[int, dict]:
         return version, kv
 
 
+def read_moe_expert_fraction(path: str | os.PathLike) -> float | None:
+    """Fraction of model parameters (by element count) that belong to MoE
+    expert tensors (name contains '_exps'). Reads the tensor-info table after
+    the metadata block. Returns None if not readable / not applicable.
+
+    Uses element count rather than byte count: experts and the rest are
+    normally the same quant, so the element ratio matches the byte ratio
+    closely while avoiding a full ggml type-size table.
+    """
+    try:
+        resolved = Path(path).resolve()
+        with open(resolved, "rb") as fh:
+            cur = _Cursor(fh)
+            if cur.u32() != GGUF_MAGIC:
+                return None
+            _version = cur.u32()
+            tensor_count = cur.u64()
+            kv_count = cur.u64()
+            for _ in range(kv_count):  # skip metadata
+                cur.string()
+                cur.value(cur.u32())
+            total = 0
+            expert = 0
+            for _ in range(tensor_count):
+                name = cur.string()
+                n_dims = cur.u32()
+                numel = 1
+                for _ in range(n_dims):
+                    numel *= cur.u64()
+                cur.u32()   # ggml type
+                cur.u64()   # offset
+                total += numel
+                if "_exps" in name:
+                    expert += numel
+            if total == 0:
+                return None
+            return expert / total
+    except (GgufError, OSError, struct.error):
+        return None
+
+
 def _as_int(v):
     """Coerce a metadata value to int. Some models store per-layer head counts
     as arrays; take the max (conservative for VRAM budgeting)."""

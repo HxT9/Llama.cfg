@@ -63,6 +63,10 @@ function renderResult(mount, sugg, onApply) {
     b.mmproj_mib ? `mmproj:        ${b.mmproj_mib} MiB (GPU-offloaded projector)` : null,
     `est. VRAM use: ${b.estimated_vram_used_mib} MiB`,
     b.is_moe ? `MoE:           ${b.expert_used_count}/${b.expert_count} experts active (full weights resident)` : null,
+    b.moe_offload && b.moe_offload["n-cpu-moe"] != null
+      ? `MoE offload:   n-cpu-moe=${b.moe_offload["n-cpu-moe"]} (experts of first N layers -> CPU RAM)`
+      : (b.moe_offload && b.moe_offload["cpu-moe"]
+        ? `MoE offload:   cpu-moe (all expert weights -> CPU RAM)` : null),
   ].filter(Boolean);
   mount.appendChild(el("div", { class: "breakdown" }, lines.join("\n")));
   if (b.moe_hint) mount.appendChild(el("div", { class: "warn" }, b.moe_hint));
@@ -71,7 +75,9 @@ function renderResult(mount, sugg, onApply) {
   }
   mount.appendChild(el("div", { class: "apply-row" },
     el("button", { class: "btn primary", onclick: () => onApply("explicit", sugg) },
-      `Apply explicit (-ngl ${sugg.explicit.ngl}, -c ${sugg.explicit.c})`),
+      `Apply explicit (-ngl ${sugg.explicit.ngl}, -c ${sugg.explicit.c}` +
+      (sugg.explicit["n-cpu-moe"] != null ? `, n-cpu-moe ${sugg.explicit["n-cpu-moe"]}`
+        : (sugg.explicit["cpu-moe"] ? `, cpu-moe` : "")) + `)`),
     el("button", { class: "btn", onclick: () => onApply("fit", sugg) },
       `Apply fit (fitc ${sugg.fit.fitc}, fitt ${sugg.fit.fitt})`),
   ));

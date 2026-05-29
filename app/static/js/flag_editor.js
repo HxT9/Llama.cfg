@@ -20,6 +20,8 @@ function commonFlags() {
     { key: "fitc", label: "fit-ctx (fitc)", type: "int" },
     { key: "fitt", label: "fit-target (fitt)", type: "string" },
     { key: "no-mmap", label: "no-mmap", type: "bool" },
+    { key: "cpu-moe", label: "cpu-moe", type: "bool" },
+    { key: "n-cpu-moe", label: "n-cpu-moe", type: "int" },
     { key: "spec-type", label: "spec-type", type: "enum", options: spec },
     { key: "spec-draft-n-max", label: "spec-draft-n-max", type: "int" },
     { key: "chat-template-kwargs", label: "chat-template-kwargs", type: "combo",
@@ -244,6 +246,14 @@ function applySuggestion(kind, sugg) {
     f["ctk"] = sugg.explicit.ctk;
     f["ctv"] = sugg.explicit.ctv;
     delete f["fit"]; delete f["fitc"]; delete f["fitt"];
+    // MoE expert offload: set whichever the suggestion chose, clear the other
+    if ("n-cpu-moe" in sugg.explicit) {
+      f["n-cpu-moe"] = String(sugg.explicit["n-cpu-moe"]); delete f["cpu-moe"];
+    } else if ("cpu-moe" in sugg.explicit) {
+      f["cpu-moe"] = "true"; delete f["n-cpu-moe"];
+    } else {
+      delete f["n-cpu-moe"]; delete f["cpu-moe"];
+    }
   } else {
     f["fit"] = sugg.fit.fit;
     f["fitc"] = String(sugg.fit.fitc);
