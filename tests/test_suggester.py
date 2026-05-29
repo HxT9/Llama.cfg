@@ -95,10 +95,11 @@ def test_dense_model_never_gets_moe_offload():
 
 def test_fit_fields_populated():
     meta = make_meta()
-    s = suggest(meta, vram_mib=16376, context=16384)
+    s = suggest(meta, vram_mib=16376, context=16384, ctk="q8_0", ctv="q8_0")
     assert s.fit["fit"] == "on"
     assert s.fit["fitc"] == 16384
     assert s.fit["fitt"] > 0
+    assert s.fit["ctk"] == "q8_0" and s.fit["ctv"] == "q8_0"
     # dense model that fits: fit config carries no MoE offload
     assert "n-cpu-moe" not in s.fit and "cpu-moe" not in s.fit
 

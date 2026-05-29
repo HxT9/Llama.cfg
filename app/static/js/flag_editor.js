@@ -258,6 +258,8 @@ function applySuggestion(kind, sugg) {
     f["fit"] = sugg.fit.fit;
     f["fitc"] = String(sugg.fit.fitc);
     f["fitt"] = String(sugg.fit.fitt);
+    f["ctk"] = sugg.fit.ctk;
+    f["ctv"] = sugg.fit.ctv;
     delete f["ngl"]; delete f["c"];
     // pin expert offload (fit only auto-tunes unset args)
     if ("n-cpu-moe" in sugg.fit) {

@@ -152,11 +152,14 @@ def suggest(
         warnings.append(moe_hint)
 
     explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv, **moe_offload}
-    # pin expert offload so --fit leaves it set and only auto-tunes ngl/ctx
+    # --fit auto-tunes only ngl/ctx; ctk/ctv (KV quant) and the expert offload
+    # are independent choices, so pin them here too.
     fit = {
         "fit": "on",
         "fitc": chosen_ctx,
         "fitt": int(headroom_mib + compute_reserve_mib),
+        "ctk": ctk,
+        "ctv": ctv,
         **moe_offload,
     }
     breakdown = {
