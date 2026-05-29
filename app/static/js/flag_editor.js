@@ -20,7 +20,6 @@ function commonFlags() {
     { key: "fitc", label: "fit-ctx (fitc)", type: "int" },
     { key: "fitt", label: "fit-target (fitt)", type: "string" },
     { key: "no-mmap", label: "no-mmap", type: "bool" },
-    { key: "cpu-moe", label: "cpu-moe", type: "bool" },
     { key: "n-cpu-moe", label: "n-cpu-moe", type: "int" },
     { key: "spec-type", label: "spec-type", type: "enum", options: spec },
     { key: "spec-draft-n-max", label: "spec-draft-n-max", type: "int" },
@@ -246,14 +245,10 @@ function applySuggestion(kind, sugg) {
     f["ctk"] = sugg.explicit.ctk;
     f["ctv"] = sugg.explicit.ctv;
     delete f["fit"]; delete f["fitc"]; delete f["fitt"];
-    // MoE expert offload: set whichever the suggestion chose, clear the other
-    if ("n-cpu-moe" in sugg.explicit) {
-      f["n-cpu-moe"] = String(sugg.explicit["n-cpu-moe"]); delete f["cpu-moe"];
-    } else if ("cpu-moe" in sugg.explicit) {
-      f["cpu-moe"] = "true"; delete f["n-cpu-moe"];
-    } else {
-      delete f["n-cpu-moe"]; delete f["cpu-moe"];
-    }
+    // MoE expert offload (always n-cpu-moe); clear any stale cpu-moe
+    if ("n-cpu-moe" in sugg.explicit) f["n-cpu-moe"] = String(sugg.explicit["n-cpu-moe"]);
+    else delete f["n-cpu-moe"];
+    delete f["cpu-moe"];
   } else {
     f["fit"] = sugg.fit.fit;
     f["fitc"] = String(sugg.fit.fitc);
@@ -261,14 +256,10 @@ function applySuggestion(kind, sugg) {
     f["ctk"] = sugg.fit.ctk;
     f["ctv"] = sugg.fit.ctv;
     delete f["ngl"]; delete f["c"];
-    // pin expert offload (fit only auto-tunes unset args)
-    if ("n-cpu-moe" in sugg.fit) {
-      f["n-cpu-moe"] = String(sugg.fit["n-cpu-moe"]); delete f["cpu-moe"];
-    } else if ("cpu-moe" in sugg.fit) {
-      f["cpu-moe"] = "true"; delete f["n-cpu-moe"];
-    } else {
-      delete f["n-cpu-moe"]; delete f["cpu-moe"];
-    }
+    // pin expert offload (fit only auto-tunes unset args); always n-cpu-moe
+    if ("n-cpu-moe" in sugg.fit) f["n-cpu-moe"] = String(sugg.fit["n-cpu-moe"]);
+    else delete f["n-cpu-moe"];
+    delete f["cpu-moe"];
   }
   current.suggestion_snapshot = sugg;
   renderEditor(current);

@@ -113,7 +113,7 @@ def suggest(
     # --- MoE expert offload (better than dropping whole layers) -------------
     # When a MoE model doesn't fully fit, keep ALL layers on GPU (attention +
     # KV stay fast) and push the bulk expert weights of the first N layers to
-    # CPU RAM via --n-cpu-moe (or --cpu-moe when all of them must move).
+    # CPU RAM via --n-cpu-moe (N == n_layers means every layer's experts).
     moe_offload: dict = {}
     moe_hint = None
     if meta.is_moe and not fits_all and expert_fraction and 0 < expert_fraction < 1:
@@ -127,9 +127,7 @@ def suggest(
             n_cpu_moe = n_layers - layers_experts_on_gpu
             ngl = offloadable                       # all layers on GPU
             fits_all = True                         # weights placed (experts spilled)
-            if n_cpu_moe >= n_layers:
-                moe_offload = {"cpu-moe": "true"}
-            elif n_cpu_moe > 0:
+            if n_cpu_moe > 0:
                 moe_offload = {"n-cpu-moe": n_cpu_moe}
             used_mib = (
                 non_expert_bytes
@@ -137,17 +135,17 @@ def suggest(
                 + kv_all + mmproj_bytes
             ) / MIB
         else:
-            # not even attention layers + KV fit with all experts on CPU
+            # not even attention layers + KV fit with every layer's experts on CPU
             moe_hint = (
-                "Even with all experts on CPU (--cpu-moe), the non-expert weights "
+                "Even with --n-cpu-moe set to all layers, the non-expert weights "
                 "plus KV cache exceed VRAM. Lower context or quantize the KV cache."
             )
             warnings.append(moe_hint)
     elif meta.is_moe and not fits_all:
         moe_hint = (
-            "MoE model and not all layers fit: consider --cpu-moe (keep all expert "
-            "weights in CPU RAM) or --n-cpu-moe N to offload only the first N layers' "
-            "experts, freeing VRAM for more attention layers + context."
+            "MoE model and not all layers fit: use --n-cpu-moe N to keep the expert "
+            "weights of the first N layers in CPU RAM (N up to all layers), freeing "
+            "VRAM for attention layers + context."
         )
         warnings.append(moe_hint)
 
