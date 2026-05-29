@@ -1,0 +1,138 @@
+"""VRAM/RAM-aware suggestion engine.
+
+Given GGUF metadata and a VRAM budget, propose how many layers to offload
+(`-ngl`) and what context (`-c`) to use, and an equivalent llama.cpp `fit`
+configuration. The math is deliberately approximate (per-layer weight cost is
+derived from file size); the `fit` variant lets llama.cpp do exact placement.
+
+MoE note: a GGUF's file size already includes ALL experts, and every expert
+weight must be resident on its device. `expert_used_count` only reduces compute
+per token, not the memory footprint. So the offload math uses the full file
+size; when layers don't all fit we recommend `--cpu-moe`/`--n-cpu-moe` to push
+expert weights to CPU RAM instead.
+"""
+from __future__ import annotations
+
+from app.config import (
+    CONTEXT_STEPS,
+    DEFAULT_COMPUTE_RESERVE_MIB,
+    DEFAULT_HEADROOM_FRAC,
+    KV_BYTES_PER_ELEM,
+)
+from app.models import GgufMetadata, Suggestion
+
+MIB = 1024 * 1024
+
+
+def _bpe(quant: str) -> float:
+    return KV_BYTES_PER_ELEM.get((quant or "f16").lower(), 2.0)
+
+
+def suggest(
+    meta: GgufMetadata,
+    vram_mib: int,
+    *,
+    context: int | None = None,
+    ctk: str = "f16",
+    ctv: str = "f16",
+    headroom_frac: float = DEFAULT_HEADROOM_FRAC,
+    compute_reserve_mib: int = DEFAULT_COMPUTE_RESERVE_MIB,
+) -> Suggestion:
+    warnings: list[str] = []
+
+    n_layers = meta.n_layers
+    if not n_layers or not meta.file_size_bytes:
+        warnings.append(
+            "GGUF metadata missing layer count or file size; cannot compute offload."
+        )
+        return Suggestion(warnings=warnings)
+
+    offloadable = n_layers + 1  # repeating blocks + output/embedding layer
+    bytes_per_layer = meta.file_size_bytes / offloadable
+
+    headroom_mib = vram_mib * headroom_frac
+    budget_mib = vram_mib - headroom_mib - compute_reserve_mib
+    budget_bytes = max(0.0, budget_mib) * MIB
+
+    n_head_kv = meta.n_head_kv
+    head_dim = meta.head_dim
+    kv_per_layer_token = 0.0
+    if n_head_kv and head_dim:
+        kv_per_layer_token = n_head_kv * head_dim * (_bpe(ctk) + _bpe(ctv))
+    else:
+        warnings.append("KV cache size unknown (missing head metadata); ignored in math.")
+
+    def kv_bytes(n: int, c: int) -> float:
+        return n * c * kv_per_layer_token
+
+    def max_ngl(c: int) -> int:
+        for n in range(offloadable, -1, -1):
+            if n * bytes_per_layer + kv_bytes(n, c) <= budget_bytes:
+                return n
+        return 0
+
+    train_ctx = meta.context_length or None
+
+    # --- choose context + ngl ----------------------------------------------
+    if context:
+        chosen_ctx = min(context, train_ctx) if train_ctx else context
+        if train_ctx and context > train_ctx:
+            warnings.append(
+                f"requested context {context} exceeds model train context "
+                f"{train_ctx}; capped (use RoPE scaling to go beyond)."
+            )
+        ngl = max_ngl(chosen_ctx)
+    else:
+        candidates = sorted(
+            {c for c in CONTEXT_STEPS if (not train_ctx or c <= train_ctx)},
+            reverse=True,
+        )
+        if train_ctx:
+            candidates = sorted(set(candidates) | {train_ctx}, reverse=True)
+        if not candidates:
+            candidates = [8192]
+        chosen_ctx = candidates[-1]
+        ngl = max_ngl(chosen_ctx)
+        for c in candidates:  # largest ctx that still offloads everything
+            if max_ngl(c) >= offloadable:
+                chosen_ctx, ngl = c, offloadable
+                break
+
+    ngl = min(ngl, offloadable)
+    fits_all = ngl >= offloadable
+
+    used_mib = (ngl * bytes_per_layer + kv_bytes(ngl, chosen_ctx)) / MIB
+
+    moe_hint = None
+    if meta.is_moe and not fits_all:
+        moe_hint = (
+            "MoE model and not all layers fit: consider --cpu-moe (keep all expert "
+            "weights in CPU RAM) or --n-cpu-moe N to offload only the first N layers' "
+            "experts, freeing VRAM for more attention layers + context."
+        )
+        warnings.append(moe_hint)
+
+    explicit = {"ngl": ngl, "c": chosen_ctx, "ctk": ctk, "ctv": ctv}
+    fit = {
+        "fit": "on",
+        "fitc": chosen_ctx,
+        "fitt": int(headroom_mib + compute_reserve_mib),
+    }
+    breakdown = {
+        "vram_mib": int(vram_mib),
+        "headroom_mib": int(headroom_mib),
+        "compute_reserve_mib": int(compute_reserve_mib),
+        "budget_mib": int(budget_mib),
+        "n_layers": n_layers,
+        "offloadable_layers": offloadable,
+        "bytes_per_layer_mib": round(bytes_per_layer / MIB, 2),
+        "kv_per_layer_per_token_bytes": round(kv_per_layer_token, 2),
+        "kv_total_mib_at_ctx": round(kv_bytes(ngl, chosen_ctx) / MIB, 2),
+        "estimated_vram_used_mib": round(used_mib, 2),
+        "fits_all_layers": fits_all,
+        "is_moe": meta.is_moe,
+        "expert_count": meta.expert_count,
+        "expert_used_count": meta.expert_used_count,
+        "moe_hint": moe_hint,
+    }
+    return Suggestion(explicit=explicit, fit=fit, breakdown=breakdown, warnings=warnings)
