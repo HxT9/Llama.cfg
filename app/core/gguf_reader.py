@@ -115,14 +115,53 @@ def _read_kv(path: Path) -> tuple[int, dict]:
         return version, kv
 
 
-def read_moe_expert_fraction(path: str | os.PathLike) -> float | None:
-    """Fraction of model parameters (by element count) that belong to MoE
-    expert tensors (name contains '_exps'). Reads the tensor-info table after
-    the metadata block. Returns None if not readable / not applicable.
+# ggml type -> (block element count, bytes per block). Used to size tensors
+# by bytes so K-quant models (experts quantized lower than attention) get an
+# accurate expert/total ratio. Unknown types fall back to element counting.
+_GGML_TYPE_SIZE = {
+    0: (1, 4),     # F32
+    1: (1, 2),     # F16
+    2: (32, 18),   # Q4_0
+    3: (32, 20),   # Q4_1
+    6: (32, 22),   # Q5_0
+    7: (32, 24),   # Q5_1
+    8: (32, 34),   # Q8_0
+    9: (32, 36),   # Q8_1
+    10: (256, 84),  # Q2_K
+    11: (256, 110), # Q3_K
+    12: (256, 144), # Q4_K
+    13: (256, 176), # Q5_K
+    14: (256, 210), # Q6_K
+    15: (256, 292), # Q8_K
+    16: (256, 66),  # IQ2_XXS
+    17: (256, 74),  # IQ2_XS
+    18: (256, 98),  # IQ3_XXS
+    19: (256, 50),  # IQ1_S
+    20: (32, 18),   # IQ4_NL
+    21: (256, 110), # IQ3_S
+    22: (256, 82),  # IQ2_S
+    23: (256, 136), # IQ4_XS
+    24: (1, 1),     # I8
+    25: (1, 2),     # I16
+    26: (1, 4),     # I32
+    27: (1, 8),     # I64
+    28: (1, 8),     # F64
+    29: (256, 56),  # IQ1_M
+    30: (1, 2),     # BF16
+    34: (256, 54),  # TQ1_0
+    35: (256, 66),  # TQ2_0
+}
 
-    Uses element count rather than byte count: experts and the rest are
-    normally the same quant, so the element ratio matches the byte ratio
-    closely while avoiding a full ggml type-size table.
+
+def read_moe_expert_fraction(path: str | os.PathLike) -> float | None:
+    """Fraction of the model's *bytes* that belong to MoE expert tensors (name
+    contains '_exps'). Reads the tensor-info table after the metadata block.
+    Returns None if not readable / not applicable.
+
+    Byte sizing matters: in K-quant models the experts are quantized at fewer
+    bits than the attention tensors, so an element-count ratio over-estimates
+    the experts' share. If any tensor uses an unknown ggml type we fall back to
+    the element-count ratio.
     """
     try:
         resolved = Path(path).resolve()
@@ -136,22 +175,33 @@ def read_moe_expert_fraction(path: str | os.PathLike) -> float | None:
             for _ in range(kv_count):  # skip metadata
                 cur.string()
                 cur.value(cur.u32())
-            total = 0
-            expert = 0
+            total_b = expert_b = 0      # bytes
+            total_n = expert_n = 0      # elements (fallback)
+            unknown_type = False
             for _ in range(tensor_count):
                 name = cur.string()
                 n_dims = cur.u32()
                 numel = 1
                 for _ in range(n_dims):
                     numel *= cur.u64()
-                cur.u32()   # ggml type
+                ttype = cur.u32()
                 cur.u64()   # offset
-                total += numel
-                if "_exps" in name:
-                    expert += numel
-            if total == 0:
-                return None
-            return expert / total
+                ts = _GGML_TYPE_SIZE.get(ttype)
+                if ts is None:
+                    unknown_type = True
+                    nbytes = 0
+                else:
+                    block_ne, block_sz = ts
+                    nbytes = (numel // block_ne) * block_sz if block_ne else 0
+                is_exp = "_exps" in name
+                total_n += numel
+                total_b += nbytes
+                if is_exp:
+                    expert_n += numel
+                    expert_b += nbytes
+            if unknown_type or total_b == 0:
+                return (expert_n / total_n) if total_n else None
+            return expert_b / total_b
     except (GgufError, OSError, struct.error):
         return None
 
