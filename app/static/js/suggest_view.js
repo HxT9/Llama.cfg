@@ -9,11 +9,19 @@ export function renderSuggest(mount, getModelPath, onApply, getMmproj) {
   mount.innerHTML = "";
   const box = el("div", { class: "suggest-box" });
 
-  const ctxInput = el("input", { type: "number", placeholder: "auto (max)", style: "width:120px" });
-  const ctk = selectFrom(CACHE_TYPES, "f16");
-  const ctv = selectFrom(CACHE_TYPES, "f16");
-  const mode = selectFrom(["free", "total", "manual"], "free");
-  const manual = el("input", { type: "number", placeholder: "VRAM MiB", style: "width:110px", disabled: "disabled" });
+  const d = (state.settings && state.settings.suggest_defaults) || {};
+  const ctxInput = el("input", {
+    type: "number", placeholder: "auto (max)", style: "width:120px",
+    value: d.context ?? "",
+  });
+  const ctk = selectFrom(CACHE_TYPES, d.ctk || "f16");
+  const ctv = selectFrom(CACHE_TYPES, d.ctv || "f16");
+  const mode = selectFrom(["free", "total", "manual"], d.vram_budget_mode || "free");
+  const manual = el("input", {
+    type: "number", placeholder: "VRAM MiB", style: "width:110px",
+    value: d.manual_vram_mib ?? "",
+  });
+  manual.disabled = mode.value !== "manual";
   mode.addEventListener("change", () => (manual.disabled = mode.value !== "manual"));
 
   const controls = el("div", { class: "suggest-controls" },
@@ -31,15 +39,23 @@ export function renderSuggest(mount, getModelPath, onApply, getMmproj) {
   async function run() {
     const model_path = getModelPath();
     if (!model_path) { toast("select a model first", "error"); return; }
+    const inputs = {
+      context: ctxInput.value ? Number(ctxInput.value) : null,
+      ctk: ctk.value, ctv: ctv.value,
+      vram_budget_mode: mode.value,
+      manual_vram_mib: manual.value ? Number(manual.value) : null,
+    };
+    // remember inputs for next time (persists across sessions)
+    if (state.settings) {
+      state.settings.suggest_defaults = inputs;
+      api.saveSettings(state.settings).catch(() => {});
+    }
     result.innerHTML = "computing…";
     try {
       const sugg = await api.suggest({
         model_path,
         mmproj_path: getMmproj ? (getMmproj() || null) : null,
-        context: ctxInput.value ? Number(ctxInput.value) : null,
-        ctk: ctk.value, ctv: ctv.value,
-        vram_budget_mode: mode.value,
-        manual_vram_mib: manual.value ? Number(manual.value) : null,
+        ...inputs,
       });
       renderResult(result, sugg, onApply);
     } catch (e) {

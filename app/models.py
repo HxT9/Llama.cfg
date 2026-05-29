@@ -129,6 +129,8 @@ class Settings(BaseModel):
     compute_reserve_mib: int = 1024
     # remembered values for editable-combobox flags, keyed by flag key
     value_presets: dict[str, list[str]] = Field(default_factory=dict)
+    # last-used suggestion panel inputs (context, ctk, ctv, vram mode, manual vram)
+    suggest_defaults: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExportRequest(BaseModel):

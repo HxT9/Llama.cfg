@@ -40,6 +40,7 @@ function renderSettings() {
       compute_reserve_mib: Number(reserve.input.value) || 1024,
       manual_vram_mib: manual.input.value ? Number(manual.input.value) : null,
       value_presets: (state.settings && state.settings.value_presets) || {},
+      suggest_defaults: (state.settings && state.settings.suggest_defaults) || {},
     };
     try {
       state.settings = await api.saveSettings(body);
