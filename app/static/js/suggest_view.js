@@ -79,7 +79,9 @@ function renderResult(mount, sugg, onApply) {
       (sugg.explicit["n-cpu-moe"] != null ? `, n-cpu-moe ${sugg.explicit["n-cpu-moe"]}`
         : (sugg.explicit["cpu-moe"] ? `, cpu-moe` : "")) + `)`),
     el("button", { class: "btn", onclick: () => onApply("fit", sugg) },
-      `Apply fit (fitc ${sugg.fit.fitc}, fitt ${sugg.fit.fitt})`),
+      `Apply fit (fitc ${sugg.fit.fitc}, fitt ${sugg.fit.fitt}` +
+      (sugg.fit["n-cpu-moe"] != null ? `, n-cpu-moe ${sugg.fit["n-cpu-moe"]}`
+        : (sugg.fit["cpu-moe"] ? `, cpu-moe` : "")) + `)`),
   ));
 }
 

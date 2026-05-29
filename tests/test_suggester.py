@@ -99,6 +99,17 @@ def test_fit_fields_populated():
     assert s.fit["fit"] == "on"
     assert s.fit["fitc"] == 16384
     assert s.fit["fitt"] > 0
+    # dense model that fits: fit config carries no MoE offload
+    assert "n-cpu-moe" not in s.fit and "cpu-moe" not in s.fit
+
+
+def test_fit_also_pins_moe_offload():
+    meta = make_meta(file_gib=36, layers=48, moe=True)
+    s = suggest(meta, vram_mib=12288, context=4096, expert_fraction=0.85)
+    assert s.fit["fit"] == "on"
+    # fit carries the same expert offload as explicit, so --fit only tunes ngl/ctx
+    assert ("n-cpu-moe" in s.fit) or ("cpu-moe" in s.fit)
+    assert s.fit.get("n-cpu-moe") == s.explicit.get("n-cpu-moe")
 
 
 def test_quantized_cache_smaller_than_f16():
