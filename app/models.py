@@ -125,6 +125,8 @@ class Settings(BaseModel):
     manual_vram_mib: Optional[int] = None
     headroom_frac: float = 0.10
     compute_reserve_mib: int = 1024
+    # remembered values for editable-combobox flags, keyed by flag key
+    value_presets: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ExportRequest(BaseModel):

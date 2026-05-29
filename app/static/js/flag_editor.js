@@ -22,7 +22,19 @@ function commonFlags() {
     { key: "no-mmap", label: "no-mmap", type: "bool" },
     { key: "spec-type", label: "spec-type", type: "enum", options: spec },
     { key: "spec-draft-n-max", label: "spec-draft-n-max", type: "int" },
+    { key: "chat-template-kwargs", label: "chat-template-kwargs", type: "combo",
+      placeholder: '{"enable_thinking": false}' },
   ];
+}
+
+// editable-combobox flags remember their values across configs (in settings)
+function comboKeys() {
+  return commonFlags().filter((s) => s.type === "combo").map((s) => s.key);
+}
+
+function presetValues(key) {
+  const p = state.settings && state.settings.value_presets;
+  return (p && p[key]) || [];
 }
 
 function enumValuesFor(canonical) {
@@ -128,24 +140,35 @@ function fieldRow(spec) {
   });
   const label = el("label", { class: "chk-flag" }, chk, spec.label);
 
-  let input;
+  let col;
   const val = current.flags[spec.key] ?? "";
   if (spec.type === "bool") {
-    input = el("span", { class: "hint" }, enabled ? "= true" : "(disabled)");
+    col = el("span", { class: "hint" }, enabled ? "= true" : "(disabled)");
   } else if (spec.type === "enum" || spec.type === "tristate") {
-    input = el("select", {
+    const sel = el("select", {
       disabled: !enabled, onchange: (e) => (current.flags[spec.key] = e.target.value),
     });
-    for (const o of spec.options || []) input.appendChild(el("option", { value: o }, o));
-    input.value = val;
+    for (const o of spec.options || []) sel.appendChild(el("option", { value: o }, o));
+    sel.value = val;
+    col = sel;
+  } else if (spec.type === "combo") {
+    const listId = `dl-${spec.key}`;
+    const input = el("input", {
+      type: "text", disabled: !enabled, value: val, list: listId,
+      placeholder: spec.placeholder || "", style: "width:100%",
+      oninput: (e) => (current.flags[spec.key] = e.target.value),
+    });
+    const dl = el("datalist", { id: listId });
+    for (const v of presetValues(spec.key)) dl.appendChild(el("option", { value: v }));
+    col = el("div", {}, input, dl);
   } else {
-    input = el("input", {
+    col = el("input", {
       type: spec.type === "int" || spec.type === "number" ? "number" : "text",
       disabled: !enabled, value: val,
       oninput: (e) => (current.flags[spec.key] = e.target.value),
     });
   }
-  return el("div", { class: "field-row" }, label, input);
+  return el("div", { class: "field-row" }, label, col);
 }
 
 function defaultFor(spec) {
@@ -232,9 +255,25 @@ function applySuggestion(kind, sugg) {
   toast(`applied ${kind} suggestion`, "ok");
 }
 
+async function rememberComboValues() {
+  if (!state.settings) return;
+  const presets = state.settings.value_presets || (state.settings.value_presets = {});
+  let changed = false;
+  for (const k of comboKeys()) {
+    const v = (current.flags[k] || "").trim();
+    if (!v) continue;
+    const arr = presets[k] || (presets[k] = []);
+    if (!arr.includes(v)) { arr.push(v); changed = true; }
+  }
+  if (changed) {
+    try { state.settings = await api.saveSettings(state.settings); } catch { /* non-fatal */ }
+  }
+}
+
 async function save() {
   if (!current) return;
   try {
+    await rememberComboValues();
     await api.updateConfig(current.id, {
       name: current.name,
       model_display_path: current.model_display_path,

@@ -39,6 +39,7 @@ function renderSettings() {
       headroom_frac: Number(headroom.input.value) || 0.1,
       compute_reserve_mib: Number(reserve.input.value) || 1024,
       manual_vram_mib: manual.input.value ? Number(manual.input.value) : null,
+      value_presets: (state.settings && state.settings.value_presets) || {},
     };
     try {
       state.settings = await api.saveSettings(body);
