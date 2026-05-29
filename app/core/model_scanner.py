@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 
-from app.core.gguf_reader import read_gguf_metadata
+from app.core.gguf_reader import read_gguf_metadata, read_moe_expert_fraction
 from app.models import ModelInfo, ScanResult
 
 # multipart: name-00001-of-00003.gguf
@@ -69,6 +69,8 @@ def scan(roots: list[str], with_metadata: bool = True) -> ScanResult:
     if with_metadata:
         for m in models:
             m.metadata = read_gguf_metadata(m.blob_path)
+            if m.metadata.is_moe:
+                m.metadata.expert_fraction = read_moe_expert_fraction(m.blob_path)
 
     models.sort(key=lambda m: m.name.lower())
     return ScanResult(models=models, warnings=warnings)

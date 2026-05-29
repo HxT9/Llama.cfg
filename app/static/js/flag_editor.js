@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { state, el, toast } from "./state.js";
 import { renderSuggest } from "./suggest_view.js";
+import { computeEstimate } from "./estimator.js";
 
 // Working copy of the entry currently being edited.
 let current = null;
@@ -66,6 +67,17 @@ export function renderEditor(entry) {
   box.appendChild(el("div", { class: "section-title" }, "Model"));
   box.appendChild(modelSelectors());
 
+  // live VRAM estimate (updates as params change)
+  box.appendChild(el("div", { class: "section-title" }, "Estimated VRAM usage"));
+  box.appendChild(el("div", { id: "est-readout", class: "breakdown" }));
+
+  // recompute the estimate on any field edit (input + change), debounced to a frame
+  if (!box._estBound) {
+    box.addEventListener("input", scheduleEstimate);
+    box.addEventListener("change", scheduleEstimate);
+    box._estBound = true;
+  }
+
   // suggestion panel
   box.appendChild(el("div", { class: "section-title" }, "Suggestion"));
   const suggestMount = el("div", {});
@@ -89,6 +101,52 @@ export function renderEditor(entry) {
     value: current.notes || "",
     oninput: (e) => (current.notes = e.target.value),
   }));
+
+  refreshEstimate();
+}
+
+let estRaf = 0;
+function scheduleEstimate() {
+  cancelAnimationFrame(estRaf);
+  estRaf = requestAnimationFrame(refreshEstimate);
+}
+
+function gb(mib) { return (mib / 1024).toFixed(1); }
+
+function refreshEstimate() {
+  const mount = document.getElementById("est-readout");
+  if (!mount || !current) return;
+  const model = state.modelsByPath[current.model_display_path];
+  const meta = model && model.metadata;
+  const total = (state.hardware && state.hardware.gpus && state.hardware.gpus[0]
+    && state.hardware.gpus[0].total_mib)
+    || (state.settings && state.settings.manual_vram_mib) || null;
+  const est = computeEstimate(meta, current.flags, total);
+  mount.innerHTML = "";
+  if (!est) {
+    mount.appendChild(el("span", { class: "muted" },
+      meta ? "need layer count + file size to estimate" : "model metadata unavailable"));
+    return;
+  }
+
+  let head, detail;
+  if (est.mode === "fit") {
+    head = est.vramMib != null
+      ? `fit mode: ~${gb(est.vramMib)} GB used (fills VRAM, leaves ~${est.fitt} MiB free)`
+      : `fit mode: fills VRAM, leaves ~${est.fitt} MiB free`;
+    detail = est.contextUsed ? `min context = ${est.contextUsed.toLocaleString()}` : "";
+  } else {
+    head = `~${gb(est.vramMib)} GB VRAM` + (total ? ` / ${gb(total)} GB` : "");
+    detail = `weights ${gb(est.gpuWeightMib)} + KV ${gb(est.kvMib)} GB · `
+      + `ngl ${est.nglUsed}/${est.offloadable} · ctx ${est.contextUsed.toLocaleString()}`;
+  }
+
+  const over = total && est.vramMib != null && est.vramMib > total;
+  const color = over ? "var(--danger)" : (total && est.vramMib != null ? "var(--good)" : "var(--text)");
+  mount.appendChild(el("div", { style: `color:${color};font-weight:600` }, head));
+  if (detail) mount.appendChild(el("div", { class: "muted" }, detail));
+  if (over) mount.appendChild(el("div", { class: "warn" }, "exceeds total VRAM — lower ngl/ctx or raise n-cpu-moe"));
+  if (current.mmproj) mount.appendChild(el("div", { class: "muted" }, "+ mmproj not included here (see Suggest)"));
 }
 
 function modelSelectors() {
