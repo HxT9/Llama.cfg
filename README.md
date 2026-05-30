@@ -1,47 +1,70 @@
-# llamacfg — llama.cpp config manager
+# llama.cfg
 
-A local web app to manage a `llama-server --models-preset` INI router config.
+A small local web app that helps you build the `llama-server` config file
+(the `--models-preset` INI) without hand-editing it.
 
-It scans GGUF models (recursively, configurable roots), scans every `llama-server`
-CLI flag from `--help`, lets you build multiple named configs per model with a flag
-editor, suggests `n-gpu-layers` / context from your VRAM+RAM and the GGUF metadata
-(MoE-aware), and composes the final INI file.
+It scans your GGUF models, knows every `llama-server` flag, and — given your
+GPU's VRAM — suggests how many layers/experts to put on the GPU and how much
+context you can afford. Then it writes the INI for you.
 
-## Setup
+## Why
+
+Maintaining the preset INI by hand is fiddly:
+
+- model paths are buried deep in the HuggingFace cache
+- `llama-server` has ~250 flags
+- picking `n-gpu-layers` / context / `n-cpu-moe` for a given GPU is guesswork,
+  especially for MoE and sliding-window models
+
+This tool does the bookkeeping and the math.
+
+## Quick start
+
+1. Double-click **`start.bat`** (or run it from a terminal).
+2. It opens **http://127.0.0.1:8080** in your browser.
+
+That's it. The window stays open while the app runs; close it or press Ctrl+C
+to stop.
+
+> First run installs dependencies automatically (via [uv](https://docs.astral.sh/uv/)).
+> Make sure `uv` is installed.
+
+## How to use it
+
+The app has four tabs:
+
+- **Models** — lists every `.gguf` it found (name, architecture, layers, size,
+  MoE badge). Click **New config** on a model to start a config for it.
+- **Configs** — your saved configs, grouped by model (you can have several per
+  model). Each config has:
+  - a flag editor (a curated *common* set plus a searchable *all flags* list)
+  - a **live VRAM estimate** that updates as you change context / ngl / cache
+    type / n-cpu-moe
+  - a **Suggest** button that reads your VRAM and proposes settings. You get two
+    one-click options: **explicit** (`-ngl` / `-c` / `n-cpu-moe`) or **fit**
+    (let llama.cpp auto-size).
+- **INI Preview** — see the generated file, then **Export** it to disk (or
+  **Import** an existing one).
+- **Settings** — where to scan for models, the `llama-server.exe` path, the
+  output INI path, and VRAM headroom.
+
+## A couple of things to know
+
+- The app keeps its own working copy of your configs; the INI is only written
+  when you click **Export**. It's safe to experiment.
+- The VRAM suggestion is a smart estimate (it understands MoE experts,
+  sliding-window attention, and hybrid models), not a guarantee — treat it as a
+  strong starting point and nudge if needed.
+- Settings, remembered values, and your last suggestion inputs persist between
+  sessions.
+
+## For developers
 
 ```powershell
-uv sync
+uv sync                 # install
+uv run uvicorn app.main:app --reload   # dev server
+uv run pytest           # tests
 ```
 
-## Run
-
-```powershell
-uv run llamacfg
-# or, for dev with autoreload:
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
-```
-
-Then open http://127.0.0.1:8080
-
-## Configuration
-
-All paths are editable in the **Settings** tab and persisted to `data/settings.json`:
-
-- **scan_roots** — folders scanned recursively for `*.gguf` (default `G:\Home\AI\HuggingFace\hub`)
-- **llama_server_exe** — used to scan flags via `--help`
-- **output_ini_path** — where the composed INI is written on Export
-
-## Tests
-
-```powershell
-uv run pytest                    # offline unit + integration tests
-uv run pytest -m requires_local  # tests needing the real exe / gguf files
-```
-
-## Notes
-
-- The JSON store (`data/configs.json`) is the working source of truth; the INI is an
-  export/import artifact. Export writes atomically; diff against your live INI before
-  pointing `output_ini_path` at it.
-- The suggestion math is an approximation (per-layer-via-filesize + KV estimate); the
-  `fit` variant lets llama.cpp do exact final placement.
+Backend is FastAPI; the frontend is plain HTML/JS (no build step). GGUF parsing,
+flag scanning, and the suggestion math live in `app/core/`.
