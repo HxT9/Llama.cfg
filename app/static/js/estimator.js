@@ -47,15 +47,23 @@ export function computeEstimate(meta, flags, totalVramMib) {
   let gpuWeight = ngl * bytesPerLayer - Math.min(nCpuMoe, ngl) * perLayerExpert;
   gpuWeight = Math.max(0, gpuWeight);
 
-  // hybrid models keep KV only on full-attention layers (1 per N)
-  const fa = meta.full_attention_interval;
-  const kvRatio = fa && fa > 1
-    ? Math.max(1, Math.round(meta.n_layers / fa)) / meta.n_layers
-    : 1;
-  const kv =
-    meta.n_head_kv && meta.head_dim
-      ? ngl * kvRatio * ctx * meta.n_head_kv * meta.head_dim * (bpe(flags.ctk) + bpe(flags.ctv))
-      : 0;
+  // KV cache: use the per-layer profile (sliding-window + hybrid aware) when
+  // available, else a simple global-layer fallback.
+  const bk = bpe(flags.ctk), bv = bpe(flags.ctv);
+  let kvTotal;
+  if (meta.kv_k_global != null) {
+    const gk = meta.kv_k_global, gv = meta.kv_v_global || 0;
+    const sk = meta.kv_k_swa || 0, sv = meta.kv_v_swa || 0, win = meta.kv_window;
+    kvTotal = ctx * (gk * bk + gv * bv) + Math.min(win || ctx, ctx) * (sk * bk + sv * bv);
+  } else if (meta.n_head_kv && meta.head_dim) {
+    const fa = meta.full_attention_interval;
+    const nG = fa && fa > 1 ? Math.max(1, Math.round(meta.n_layers / fa)) : meta.n_layers;
+    kvTotal = ctx * nG * meta.n_head_kv * meta.head_dim * (bk + bv);
+  } else {
+    kvTotal = 0;
+  }
+  const kvFrac = meta.n_layers ? Math.min(ngl, meta.n_layers) / meta.n_layers : 0;
+  const kv = kvTotal * kvFrac;
 
   return {
     mode: "explicit",

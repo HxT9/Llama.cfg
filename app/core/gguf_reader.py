@@ -206,6 +206,68 @@ def read_moe_expert_fraction(path: str | os.PathLike) -> float | None:
         return None
 
 
+def _kv_profile(kv: dict, arch: str | None, n_layers: int | None) -> dict | None:
+    """Compute per-token KV-cache element sums, accounting for sliding-window
+    attention (Gemma) and hybrid SSM layers (Qwen3-Next/3.6).
+
+    Returns {k_global, v_global, k_swa, v_swa, window} where *_global scale with
+    full context and *_swa are capped at `window` tokens. None if not derivable.
+    """
+    if not arch or not n_layers:
+        return None
+
+    def g(suffix):
+        return kv.get(f"{arch}.{suffix}")
+
+    klen = _as_int(g("attention.key_length"))
+    vlen = _as_int(g("attention.value_length"))
+    hkv_raw = g("attention.head_count_kv")
+    if klen is None or vlen is None or hkv_raw is None:
+        return None
+    klen_swa = _as_int(g("attention.key_length_swa")) or klen
+    vlen_swa = _as_int(g("attention.value_length_swa")) or vlen
+    window = _as_int(g("attention.sliding_window"))
+    pattern = g("attention.sliding_window_pattern")
+    fai = _as_int(g("full_attention_interval"))
+    is_ssm = any(k.startswith(f"{arch}.ssm.") for k in kv)
+
+    def hkv_at(i):
+        if isinstance(hkv_raw, (list, tuple)):
+            return int(hkv_raw[i] if i < len(hkv_raw) else hkv_raw[-1])
+        return int(hkv_raw)
+
+    gk = gv = sk = sv = 0
+    if isinstance(pattern, (list, tuple)) and pattern:
+        # Gemma-style: per-layer bool, True = sliding-window (local) layer
+        for i in range(n_layers):
+            swa = bool(pattern[i] if i < len(pattern) else pattern[-1])
+            h = hkv_at(i)
+            if swa:
+                sk += h * klen_swa
+                sv += h * vlen_swa
+            else:
+                gk += h * klen
+                gv += h * vlen
+    elif fai and fai > 1:
+        # Qwen-style: 1 full-attention layer per `fai`; the rest are SSM (no KV)
+        # unless a sliding window is defined (then they are windowed).
+        n_global = max(1, round(n_layers / fai))
+        h = hkv_at(0)
+        gk = n_global * h * klen
+        gv = n_global * h * vlen
+        if window and not is_ssm:
+            n_local = n_layers - n_global
+            sk = n_local * h * klen_swa
+            sv = n_local * h * vlen_swa
+    else:
+        for i in range(n_layers):
+            h = hkv_at(i)
+            gk += h * klen
+            gv += h * vlen
+
+    return {"k_global": gk, "v_global": gv, "k_swa": sk, "v_swa": sv, "window": window}
+
+
 def _as_int(v):
     """Coerce a metadata value to int. Some models store per-layer head counts
     as arrays; take the max (conservative for VRAM budgeting)."""
@@ -253,6 +315,11 @@ def read_gguf_metadata(path: str | os.PathLike) -> GgufMetadata:
     expert_count = _as_int(a("expert_count")) or 0
     expert_used = _as_int(a("expert_used_count")) or 0
 
+    try:
+        kvp = _kv_profile(kv, arch, _as_int(a("block_count"))) or {}
+    except Exception:
+        kvp = {}
+
     return GgufMetadata(
         architecture=arch,
         name=kv.get("general.name"),
@@ -266,6 +333,11 @@ def read_gguf_metadata(path: str | os.PathLike) -> GgufMetadata:
         expert_count=int(expert_count),
         expert_used_count=int(expert_used),
         full_attention_interval=_as_int(a("full_attention_interval")),
+        kv_k_global=kvp.get("k_global"),
+        kv_v_global=kvp.get("v_global"),
+        kv_k_swa=kvp.get("k_swa"),
+        kv_v_swa=kvp.get("v_swa"),
+        kv_window=kvp.get("window"),
         file_size_bytes=size,
         is_moe=int(expert_count) > 1,
     )

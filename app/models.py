@@ -21,6 +21,13 @@ class GgufMetadata(BaseModel):
     expert_used_count: int = 0              # <arch>.expert_used_count
     expert_fraction: Optional[float] = None  # fraction of params in MoE experts
     full_attention_interval: Optional[int] = None  # hybrid: 1 full-attn layer per N
+    # KV-cache element profile (per token). Global layers scale with full context;
+    # SWA layers are capped at kv_window tokens. Sums are over all layers.
+    kv_k_global: Optional[int] = None
+    kv_v_global: Optional[int] = None
+    kv_k_swa: Optional[int] = None
+    kv_v_swa: Optional[int] = None
+    kv_window: Optional[int] = None
     file_size_bytes: int = 0
     is_moe: bool = False
     error: Optional[str] = None

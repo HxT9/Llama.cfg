@@ -38,8 +38,10 @@ def test_kv_math_matches_hand_computation():
     meta = make_meta(file_gib=8, layers=32)
     s = suggest(meta, vram_mib=24576, context=8192, ctk="f16", ctv="f16")
     ngl = s.explicit["ngl"]
+    # KV exists only on real layers (capped at n_layers, not the +1 output layer)
+    kv_layers = min(ngl, meta.n_layers)
     # 2 bytes (f16) for K + 2 for V per element
-    expected = ngl * 8192 * meta.n_head_kv * meta.head_dim * (2.0 + 2.0) / MIB
+    expected = kv_layers * 8192 * meta.n_head_kv * meta.head_dim * (2.0 + 2.0) / MIB
     assert abs(s.breakdown["kv_total_mib_at_ctx"] - round(expected, 2)) < 1.0
 
 
@@ -142,12 +144,32 @@ def test_hybrid_model_kv_scaled_by_full_attention_interval():
     hybrid = make_meta(file_gib=16, layers=40, moe=True, full_attention_interval=4)
     sf = suggest(full, vram_mib=16376, context=131072, ctk="q8_0", ctv="q8_0", expert_fraction=0.9)
     sh = suggest(hybrid, vram_mib=16376, context=131072, ctk="q8_0", ctv="q8_0", expert_fraction=0.9)
-    # hybrid keeps far fewer KV layers
-    assert sh.breakdown["kv_layers"] == 10
-    assert sf.breakdown["kv_layers"] == 40
+    # hybrid's KV is ~1/4 of the full-attention model's
     assert sh.breakdown["kv_total_mib_at_ctx"] < sf.breakdown["kv_total_mib_at_ctx"] / 2
     # smaller KV -> fewer experts forced to CPU
     assert sh.explicit.get("n-cpu-moe", 0) <= sf.explicit.get("n-cpu-moe", 0)
+
+
+def test_sliding_window_profile_caps_kv():
+    # Gemma-style: most layers are sliding-window (capped at the window), so KV
+    # at huge context stays small. Profile fields drive the math directly.
+    swa = GgufMetadata(
+        architecture="gemma4", n_layers=30, context_length=262144,
+        n_head=16, n_head_kv=8, head_dim=512,
+        expert_count=128, expert_used_count=8, is_moe=True,
+        file_size_bytes=16 * 1024 * MIB,
+        kv_k_global=5 * 2 * 512, kv_v_global=5 * 2 * 512,     # 5 global layers
+        kv_k_swa=25 * 8 * 256, kv_v_swa=25 * 8 * 256,         # 25 SWA layers
+        kv_window=1024,
+    )
+    s = suggest(swa, vram_mib=16376, context=100000, ctk="q8_0", ctv="q8_0", expert_fraction=0.9)
+    # global part scales with 100k, SWA part is capped at the 1024 window
+    bk = 1.06
+    expected = (100000 * (swa.kv_k_global + swa.kv_v_global)
+                + 1024 * (swa.kv_k_swa + swa.kv_v_swa)) * bk / MIB
+    assert abs(s.breakdown["kv_total_mib_at_ctx"] - round(expected, 2)) < 5.0
+    # far smaller than the naive all-layer/full-context estimate (~7 GB)
+    assert s.breakdown["kv_total_mib_at_ctx"] < 1500
 
 
 def test_missing_metadata_returns_warning():

@@ -61,25 +61,37 @@ def suggest(
     budget_mib = vram_mib - headroom_mib - compute_reserve_mib
     budget_bytes = max(0.0, budget_mib * MIB - mmproj_bytes)
 
-    n_head_kv = meta.n_head_kv
-    head_dim = meta.head_dim
-    kv_per_layer_token = 0.0
-    if n_head_kv and head_dim:
-        kv_per_layer_token = n_head_kv * head_dim * (_bpe(ctk) + _bpe(ctv))
+    # KV cache element profile (accounts for sliding-window attention and hybrid
+    # SSM layers). Falls back to a simple all-/global-layer estimate when the
+    # precomputed profile is absent (e.g. synthetic metadata in tests).
+    bk, bv = _bpe(ctk), _bpe(ctv)
+    gk = meta.kv_k_global
+    if gk is not None:
+        gv = meta.kv_v_global or 0
+        sk = meta.kv_k_swa or 0
+        sv = meta.kv_v_swa or 0
+        win = meta.kv_window
+        have_kv = bool(gk or gv or sk or sv)
+    elif meta.n_head_kv and meta.head_dim:
+        fa = meta.full_attention_interval
+        n_global = max(1, round(n_layers / fa)) if (fa and fa > 1) else n_layers
+        gk = gv = n_global * meta.n_head_kv * meta.head_dim
+        sk = sv = 0
+        win = None
+        have_kv = True
     else:
+        gk = gv = sk = sv = 0
+        win = None
+        have_kv = False
+    if not have_kv:
         warnings.append("KV cache size unknown (missing head metadata); ignored in math.")
 
-    # Hybrid models (e.g. Qwen3-Next/3.6: full_attention_interval=N) only keep a
-    # context-scaling KV cache on the full-attention layers; the rest are
-    # SSM/linear and use a tiny fixed state. Scale KV by that fraction.
-    fa = meta.full_attention_interval
-    n_kv_layers = (
-        max(1, round(n_layers / fa)) if (fa and fa > 1) else n_layers
-    )
-    kv_layer_ratio = n_kv_layers / n_layers if n_layers else 1.0
+    def kv_total_bytes(c: int) -> float:
+        return c * (gk * bk + gv * bv) + min(win or c, c) * (sk * bk + sv * bv)
 
     def kv_bytes(n: int, c: int) -> float:
-        return n * kv_layer_ratio * c * kv_per_layer_token
+        frac = (min(n, n_layers) / n_layers) if n_layers else 0.0
+        return kv_total_bytes(c) * frac
 
     def max_ngl(c: int) -> int:
         for n in range(offloadable, -1, -1):
@@ -183,9 +195,8 @@ def suggest(
         "offloadable_layers": offloadable,
         "ngl": ngl,
         "bytes_per_layer_mib": round(bytes_per_layer / MIB, 2),
-        "kv_per_layer_per_token_bytes": round(kv_per_layer_token, 2),
-        "kv_layers": n_kv_layers,
         "kv_total_mib_at_ctx": round(kv_bytes(ngl, chosen_ctx) / MIB, 2),
+        "kv_sliding_window": win,
         "mmproj_mib": round(mmproj_mib, 2),
         "estimated_vram_used_mib": round(used_mib, 2),
         "fits_all_layers": fits_all,
