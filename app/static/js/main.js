@@ -3,6 +3,7 @@ import { state, indexFlags, toast } from "./state.js";
 import { initModelsView, loadModels, setCreateHandler } from "./models_view.js";
 import { initConfigList, loadConfigs, createFromModel } from "./config_list.js";
 import { loadSettings } from "./settings_view.js";
+import { initTheme } from "./theme.js";
 
 function initTabs() {
   const tabs = document.querySelectorAll(".tab");
@@ -71,6 +72,7 @@ function initPreview() {
 }
 
 async function main() {
+  initTheme();
   initTabs();
   initModelsView();
   initConfigList();

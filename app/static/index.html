@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>llama.cfg — llama.cpp config manager</title>
   <link rel="stylesheet" href="/css/styles.css" />
+  <script>
+    // apply saved theme before paint to avoid a flash
+    document.documentElement.dataset.theme = localStorage.getItem("llamacfg-theme") || "light";
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -16,6 +20,7 @@
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
     <div id="hw-badge" class="hw-badge" title="detected hardware">…</div>
+    <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark theme">🌙</button>
   </header>
 
   <main>

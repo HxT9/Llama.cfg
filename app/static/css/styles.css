@@ -14,6 +14,20 @@
   font-size: 14px;
 }
 
+:root[data-theme="dark"] {
+  --bg: #1b1916;
+  --bg2: #24211d;
+  --panel: #2a2723;
+  --border: #3a352e;
+  --text: #ece9e3;
+  --muted: #a39e94;
+  --accent: #e08763;
+  --accent2: #c79a7e;
+  --good: #6cc08a;
+  --warn: #d6a45a;
+  --danger: #e07a6e;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
@@ -45,6 +59,12 @@ body {
   padding: .35rem .6rem; border-radius: var(--radius); border: 1px solid var(--border);
   white-space: nowrap;
 }
+.theme-toggle {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  width: 32px; height: 32px; border-radius: var(--radius); cursor: pointer;
+  font-size: 1rem; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.theme-toggle:hover { border-color: var(--accent); }
 
 main { flex: 1; overflow: hidden; }
 .panel { display: none; height: 100%; overflow: auto; padding: 1rem; }
